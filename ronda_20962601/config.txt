@@ -1,0 +1,10 @@
+
+# Student Information
+Surname: Trump
+GivenNames: Donald
+StudentID: 12345678
+
+# Hyperparameters
+learning_rate: 0.001
+batch_size: 32
+num_epochs: 10
