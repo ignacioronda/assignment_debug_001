@@ -11,7 +11,7 @@
 # limitations under the License.
 
 # Author: Ignacio Ronda
-# Last Modified: 2025-10-04
+# Last Modified: 2025-10-15
 
 import os
 
@@ -39,14 +39,22 @@ def save_output(output_path, content, output_type='txt'):
 
 def preprocess_character_image(img_path, target_size=(28, 28)):
     """
-    Preprocess a character image for CNN prediction.
+    BALANCED preprocessing to match MNIST characteristics.
+    
+    More conservative than previous version to avoid over-processing.
+    
+    Key improvements:
+    1. Light background cleanup (not too aggressive)
+    2. Simple Otsu thresholding (proven to work)
+    3. Maintain aspect ratio during resize (CRITICAL)
+    4. Center digit in canvas like MNIST
     
     Args:
         img_path: Path to character image
         target_size: Target size for resizing (width, height)
     
     Returns:
-        Preprocessed image array ready for CNN input
+        Preprocessed image array ready for CNN input (1, 28, 28, 1)
     """
     # Read image in grayscale
     img = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
@@ -54,21 +62,74 @@ def preprocess_character_image(img_path, target_size=(28, 28)):
     if img is None:
         return None
     
-    # Resize to 28x28 (MNIST size)
-    img_resized = cv2.resize(img, target_size, interpolation=cv2.INTER_AREA)
+    # Step 1: Light Gaussian blur to reduce noise (but preserve structure)
+    blurred = cv2.GaussianBlur(img, (3, 3), 0)
     
-    # Check if image is white text on black background or vice versa
-    # MNIST is white digits on black background
-    mean_val = np.mean(img_resized)
+    # Step 2: Otsu's thresholding (simple and effective)
+    _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
+    # Step 3: Check polarity - MNIST is white digits on black background
+    mean_val = np.mean(binary)
     if mean_val > 127:  # Black text on white background
-        img_resized = 255 - img_resized  # Invert
+        binary = cv2.bitwise_not(binary)
     
-    # Normalize to [0, 1]
-    img_normalized = img_resized.astype('float32') / 255.0
+    # Step 4: VERY LIGHT morphological opening to remove tiny noise only
+    # Use small kernel (2x2) to avoid destroying digit structure
+    kernel_tiny = np.ones((2, 2), np.uint8)
+    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_tiny, iterations=1)
     
-    # Reshape to (1, 28, 28, 1) for CNN input
-    img_input = img_normalized.reshape(1, 28, 28, 1)
+    # Step 5: Find bounding box and crop tightly
+    coords = cv2.findNonZero(binary)
+    if coords is None:
+        # Empty image - return blank
+        result = np.zeros(target_size, dtype=np.float32)
+        return result.reshape(1, 28, 28, 1)
+    
+    x, y, w, h = cv2.boundingRect(coords)
+    cropped = binary[y:y+h, x:x+w]
+    
+    # Step 6: Add small padding around the cropped digit (helps with borders)
+    pad = 2
+    cropped_padded = cv2.copyMakeBorder(
+        cropped, pad, pad, pad, pad, 
+        cv2.BORDER_CONSTANT, value=0
+    )
+    h, w = cropped_padded.shape
+    
+    # Step 7: Resize maintaining aspect ratio (CRITICAL FIX!)
+    # MNIST digits fit in ~20x20 box within 28x28 image
+    target_inner = 20
+    
+    # Calculate scale to fit in 20x20 while preserving aspect ratio
+    scale = min(target_inner / w, target_inner / h)
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+    
+    # Ensure dimensions are at least 1 pixel
+    new_w = max(1, new_w)
+    new_h = max(1, new_h)
+    
+    # Resize with INTER_AREA for downscaling (preserves details)
+    resized = cv2.resize(cropped_padded, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    
+    # Step 8: Center in 28x28 canvas (like MNIST)
+    canvas = np.zeros(target_size, dtype=np.uint8)
+    
+    # Calculate centering offsets
+    y_offset = (target_size[0] - new_h) // 2
+    x_offset = (target_size[1] - new_w) // 2
+    
+    # Place resized digit on canvas
+    canvas[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
+    
+    # Step 9: Very light blur to smooth pixelation (optional)
+    canvas = cv2.GaussianBlur(canvas, (3, 3), 0.5)
+    
+    # Step 10: Normalize to [0, 1]
+    normalized = canvas.astype('float32') / 255.0
+    
+    # Reshape for CNN input: (1, 28, 28, 1)
+    img_input = normalized.reshape(1, 28, 28, 1)
     
     return img_input
 
@@ -220,9 +281,12 @@ def run_task3(image_path, config):
         print(f"    {status} {bn_name}: {count} character(s) recognized")
     
     # Calculate pass status
+    accuracy = (total_recognized / total_characters * 100) if total_characters > 0 else 0
     pass_threshold = total_characters * 0.5
+    
     print(f"\n  Total characters: {total_characters}")
     print(f"  Total recognized: {total_recognized}")
+    print(f"  Accuracy: {accuracy:.1f}%")
     print(f"  Pass requirement: {pass_threshold:.0f} characters (50%)")
     print(f"  Status: {'✓ PASS' if total_recognized >= pass_threshold else '✗ FAIL'}")
     print(f"{'='*60}\n")
