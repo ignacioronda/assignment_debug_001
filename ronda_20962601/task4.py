@@ -358,7 +358,7 @@ def run_task4(image_path, config):
     
     # Load YOLOv8 model for Task 1
     from ultralytics import YOLO
-    yolo_model_path = 'data/building_number_detector.pt'
+    yolo_model_path = 'data/building_number_detector_v2.pt'
     if not os.path.exists(yolo_model_path):
         yolo_model_path = 'runs/building_numbers/train/weights/best.pt'
     
@@ -371,7 +371,7 @@ def run_task4(image_path, config):
     
     # Load CNN model for Task 3
     from tensorflow import keras
-    cnn_model_path = 'data/digit_classifier.h5'
+    cnn_model_path = 'data/digit_classifier_finetuned.h5'
     if not os.path.exists(cnn_model_path):
         cnn_model_path = 'data/digit_classifier.keras'
     
